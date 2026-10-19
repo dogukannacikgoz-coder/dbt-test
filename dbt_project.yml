@@ -1,0 +1,46 @@
+name: odi_dbt
+version: '1.0.0'
+config-version: 2
+profile: odi_dbt
+require-dbt-version: [">=1.7.0", "<2.0.0"]
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+
+vars:
+  # her step ODI_STEP_LOG'a yazılır (tablo sql/00_sources.sql'de; prod'da PDM ile açın)
+  odi_log_table: ODI_STEP_LOG
+  # runtime parametre tablosu (AKIS_PARAM). Tanımlıysa odi_param() --vars yoksa buradan okur.
+  # odi_param_table: ETL.AKIS_PARAM
+  # odi_param_name_col: PARAM_ADI
+  # odi_param_value_col: PARAM_DEGERI
+  # odi_param_filter: "AKIS_ADI = 'DM_CAD'"
+
+models:
+  odi_dbt:
+    # Oracle örnekleri sadece oracle target'ında, Trino örnekleri sadece trino target'ında derlenir
+    odi:
+      +enabled: "{{ target.type == 'oracle' }}"
+      +tags: ["odi_examples"]
+      01_control_append:     {+tags: ["km_control_append"]}
+      02_incremental_update: {+tags: ["km_incremental_update"]}
+      03_merge:              {+tags: ["km_merge"]}
+      04_scd:                {+tags: ["km_scd"]}
+      05_partition:          {+tags: ["km_partition"]}
+      06_lkm:                {+tags: ["km_lkm"]}
+    flows:
+      +enabled: "{{ target.type == 'oracle' }}"
+      +tags: ["flows"]
+      # Bankadaki gibi CREATE TABLE yetkisi yoksa klasör bazında:
+      # +odi_work_schema: WRK
+      # +odi_flow_mode: existing
+      # +odi_ckm_create_error_table: false
+    trino:
+      +enabled: "{{ target.type == 'trino' }}"
+      +tags: ["trino_examples"]
+      01_control_append:     {+tags: ["km_control_append"]}
+      02_incremental_update: {+tags: ["km_incremental_update"]}
+      03_merge:              {+tags: ["km_merge"]}
+      04_scd:                {+tags: ["km_scd"]}
+      05_partition:          {+tags: ["km_partition"]}
+      06_lkm:                {+tags: ["km_lkm"]}

@@ -1,0 +1,15 @@
+version: 2
+sources:
+  - name: src
+    schema: "{{ env_var('ORA_USER', 'odi_test') | upper }}"
+    tables:
+      - name: src_customer
+        description: Müşteri tam liste (her gün tamamı)
+      - name: src_customer_cdc
+        description: Müşteri CDC — sadece değişenler, OP_TYPE I/U/D
+      - name: src_customer_snap
+        description: Müşteri snapshot — kaynakta silinen artık gelmez
+      - name: src_txn
+        description: İşlemler (partition örnekleri)
+      - name: d_branch
+        description: Şube referansı

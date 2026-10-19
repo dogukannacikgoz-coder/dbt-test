@@ -1,0 +1,11 @@
+version: 2
+sources:
+  - name: src_trn
+    database: "{{ env_var('TRINO_CATALOG', 'iceberg') }}"
+    schema: "{{ env_var('TRINO_SCHEMA', 'odi_test') }}"
+    tables:
+      - name: src_customer
+      - name: src_customer_cdc
+      - name: src_customer_snap
+      - name: src_txn
+      - name: d_branch
