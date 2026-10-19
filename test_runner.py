@@ -23,7 +23,14 @@ Kullanım (Trino / Iceberg):
   python test_runner.py -s tag:km_merge # sadece seçili modeller (dbt selector)
   python test_runner.py --keep          # şemayı temizlemeden (setup'ları atlar)
 
-GÜVENLİK: Şema temizliği sadece kullanıcı / şema adı ODI_TEST ile başlıyorsa yapılır.
+GÜVENLİK
+  - Sadece kullanıcı / şema adı ODI_TEST ile başlıyorsa çalışır (DWH şemasında asla).
+  - Şema taraması ile DROP YOK. Silinebilecek tablolar sadece:
+      a) bu script'in kendi setup'larında (sql/00_sources.sql + modellerin @setup bloğu)
+         ADIYLA geçen VE yaratılırken COMMENT 'ODI_DBT_TEST' ile işaretlenmiş tablolar
+      b) test modellerinin work tabloları (I$_/C$_/X$_/E$_<alias>) VE COMMENT 'ODI_DBT_WORK'
+    Listedeki bir isim şemada işaretsiz duruyorsa (başkasının tablosu) hiçbir şey silinmez,
+    test durur. Sequence'lar hiç silinmez (varsa yeniden kullanılır).
 """
 import ast
 import glob
@@ -63,6 +70,11 @@ KEEP = "--keep" in ARGS
 DAYS = {"day1": "2026-10-01", "day2": "2026-10-02", "day3": "2026-10-01"}
 
 FAILS, PASSES = [], 0
+TEST_MARK, WORK_MARK = "ODI_DBT_TEST", "ODI_DBT_WORK"
+WORK_PREFIXES = ["odi_i_", "odi_c_", "odi_x_", "odi_e_"] if TRINO else ["I$_", "C$_", "X$_", "E$_"]
+
+if not USER.upper().startswith("ODI_TEST"):
+    sys.exit(f"Güvenlik: test sadece ODI_TEST* kullanıcısında/şemasında koşar (şu an {USER}). DWH şemasında çalıştırmayın.")
 
 
 # ------------------------------------------------------------------ yardımcılar
@@ -207,34 +219,128 @@ if names is not None:
     models = [m for m in models if m["name"] in names]
 print(f"{len(models)} model bulundu: " + ", ".join(m["name"] for m in models))
 
+# ------------------------------------------------------------------ güvenli temizlik
+CREATE_RE = re.compile(r'^\s*CREATE\s+(?:GLOBAL\s+TEMPORARY\s+)?TABLE\s+("?[\w$#]+"?)', re.I)
+
+
+def ident(raw):
+    """SQL'de yazıldığı haliyle tablo adı -> sözlükteki hali"""
+    if raw.startswith('"'):
+        return raw.strip('"')
+    return raw.lower() if TRINO else raw.upper()
+
+
+def created_tables(text):
+    out = []
+    for st in split_statements(text):
+        m = CREATE_RE.match(st)
+        if m:
+            out.append((ident(m.group(1)), m.group(1)))
+    return out
+
+
+def model_alias(m):
+    a = re.search(r"alias\s*=\s*'([^']+)'", open(m["path"], encoding="utf-8").read())
+    return ident(a.group(1)) if a else None
+
+
+def existing_tables():
+    """şemadaki tablolar + yorumları (sadece okuma)"""
+    if TRINO:
+        rows = q(f"""select t.table_name, c.comment
+                       from {CATALOG}.information_schema.tables t
+                       left join system.metadata.table_comments c
+                         on c.catalog_name = '{CATALOG}' and c.schema_name = t.table_schema and c.table_name = t.table_name
+                      where t.table_schema = '{USER.lower()}'""")
+        return {r[0]: (r[1], "N") for r in rows}
+    rows = q("""select t.table_name, c.comments, t.temporary
+                  from user_tables t
+                  left join user_tab_comments c on c.table_name = t.table_name""")
+    return {r[0]: (r[1], r[2]) for r in rows}
+
+
+def mark(raw_name):
+    execute_all([f"COMMENT ON TABLE {raw_name} IS '{TEST_MARK}'"], "işaret")
+
+
+src_text = open(os.path.join(SQL_DIR, "00_sources.sql")).read()
+TEST_TABLES = {n for n, _ in created_tables(src_text)}
+for m in models:
+    TEST_TABLES |= {n for n, _ in created_tables(m["setup"])}
+ALIASES = {a for a in (model_alias(m) for m in models) if a}
+
+
+def is_test_work_table(name):
+    for p in WORK_PREFIXES:
+        pp = p.lower() if TRINO else p
+        for a in ALIASES:
+            if name == pp + a or re.fullmatch(re.escape(pp + a) + r"_[0-9a-fA-F]{6}", name):
+                return True
+    return False
+
+
+def plan_cleanup():
+    to_drop, foreign = [], []
+    for name, (cmt, temp) in existing_tables().items():
+        if name in TEST_TABLES:
+            (to_drop if cmt == TEST_MARK else foreign).append((name, temp))
+        elif is_test_work_table(name):
+            (to_drop if cmt == WORK_MARK else foreign).append((name, temp))
+        # diğer tüm tablolar: hiç dokunulmaz
+    return to_drop, foreign
+
+
+def assert_ours():
+    """gün verisi yüklenmeden önce: test tabloları var ve hepsi test işaretli mi"""
+    info = existing_tables()
+    # --keep: tablolar PDM ile açılmış olabilir (işaretsiz); ODI_TEST* şema şartı zaten geçerli
+    bad = [] if KEEP else [n for n in TEST_TABLES if n in info and info[n][0] != TEST_MARK]
+    missing = [n for n in TEST_TABLES if n not in info]
+    if bad or missing:
+        sys.exit("Güvenlik: test tabloları işaretsiz ya da eksik, gün verisi YÜKLENMEDİ.\n"
+                 f"  işaretsiz: {sorted(bad)}\n  eksik: {sorted(missing)}")
+
+
 if not KEEP:
     section("TEMİZLİK + SETUP")
-    if not USER.upper().startswith("ODI_TEST"):
-        sys.exit(f"Güvenlik: şema temizliği sadece ODI_TEST* kullanıcısında/şemasında yapılır (şu an {USER}). --keep ile setup'sız koşun.")
-    if TRINO:
-        tbls = [r[0] for r in q(f"select table_name from {CATALOG}.information_schema.tables where table_schema = '{USER.lower()}'")]
-        execute_all([f"drop table if exists {CATALOG}.{USER}.{t}" for t in tbls], "temizlik")
-    else:
-      execute_all(["""
-BEGIN
-  FOR t IN (SELECT table_name FROM user_tables WHERE temporary = 'N' AND nested = 'NO' AND iot_type IS NULL) LOOP
-    EXECUTE IMMEDIATE 'DROP TABLE "' || t.table_name || '" CASCADE CONSTRAINTS PURGE';
-  END LOOP;
-  FOR t IN (SELECT table_name FROM user_tables WHERE temporary = 'Y') LOOP
-    EXECUTE IMMEDIATE 'TRUNCATE TABLE "' || t.table_name || '"';
-    EXECUTE IMMEDIATE 'DROP TABLE "' || t.table_name || '" PURGE';
-  END LOOP;
-  FOR s IN (SELECT sequence_name FROM user_sequences WHERE sequence_name NOT LIKE 'ISEQ$$%') LOOP
-    EXECUTE IMMEDIATE 'DROP SEQUENCE "' || s.sequence_name || '"';
-  END LOOP;
-END;"""], "temizlik")
-    print("   şema temizlendi")
-    execute_all(split_statements(open(os.path.join(SQL_DIR, "00_sources.sql")).read()), "00_sources")
+    to_drop, foreign = plan_cleanup()
+    if foreign:
+        sys.exit("Güvenlik: aşağıdaki tablolar test isimleriyle aynı ama test/odi_dbt işareti YOK "
+                 "(başkasının tablosu olabilir). HİÇBİR ŞEY SİLİNMEDİ:\n  " + "\n  ".join(n for n, _ in foreign))
+    stmts = []
+    for name, temp in to_drop:
+        if TRINO:
+            stmts.append(f'drop table {CATALOG}.{USER}."{name}"')
+        else:
+            if temp == "Y":
+                stmts.append(f'TRUNCATE TABLE "{name}"')
+            stmts.append(f'DROP TABLE "{name}" PURGE')
+    execute_all(stmts, "temizlik")
+    print(f"   {len(to_drop)} test tablosu silindi (sadece isim listesindeki + işaretli olanlar)")
+
+    def run_setup(text, label):
+        for st in split_statements(text):
+            if re.match(r"\s*CREATE\s+SEQUENCE", st, re.I):
+                try:
+                    execute_all([st], label)
+                except DBError as e:
+                    if "ORA-00955" not in str(e):
+                        raise
+                    print("   (sequence zaten var, yeniden kullanılıyor)")
+                continue
+            execute_all([st], label)
+            m = CREATE_RE.match(st)
+            if m:
+                mark(m.group(1))
+
+    run_setup(src_text, "00_sources")
     print(f"   {os.path.relpath(SQL_DIR, HERE)}/00_sources.sql")
     for m in models:
         if m["setup"].strip():
-            execute_all(split_statements(m["setup"]), m["name"])
+            run_setup(m["setup"], m["name"])
             print(f"   @setup {m['name']}")
+
+assert_ours()
 
 for day in ["day1", "day2", "day3"]:
     section(f"{day.upper()} — load_date {DAYS[day]}")
@@ -265,9 +371,9 @@ if IU in names_set:
     check("t_iu satır", normalize(q("select count(*) from t_iu")), 6)
     check("t_iu update kolonu hepsi boş", normalize(q(f"select count(*) from t_iu where {UPD} is not null")), 0)
 
-section("Work tablo temizliği — odi_drop_work_tables (dry run)")
+section("Work tablo temizliği — odi_drop_work_tables (dry run, sadece işaretli tablolar)")
 p = subprocess.run(["dbt", "run-operation", "odi_drop_work_tables", "--profiles-dir", HERE, "--project-dir", HERE, *TARGET_ARGS,
-                    "--args", "{dry_run: true}"], capture_output=True, text=True)
+                    "--args", "{schema: " + USER + ", older_than_hours: 0}"], capture_output=True, text=True)
 print("   " + "\n   ".join(l for l in p.stdout.splitlines() if "work tablo" in l or "dry-run" in l))
 check("run-operation çalıştı", p.returncode, 0)
 
