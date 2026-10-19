@@ -41,60 +41,91 @@
 {% endmacro %}
 
 {# ---------------------------------------------------------------------------
-   Yarım kalmış work tablolarını temizle (unique temp names / fail olmuş run'lar)
-   dbt run-operation odi_drop_work_tables --args '{schema: WRK, older_than_hours: 12}'
-   dbt run-operation odi_drop_work_tables --args '{schema: WRK, dry_run: true}'
+   Yarım kalmış work tablolarını temizle (fail olmuş run'lardan / unique temp names'ten kalan)
+   GÜVENLİK:
+     - Şema taraması YOK: sadece COMMENT = 'ODI_DBT_WORK' işaretli VE work önekli
+       (I$_ / C$_ / X$_, include_errors ile E$_) tablolar listelenir. odi_dbt'nin
+       yaratmadığı hiçbir tablo (ODI'ın kendi I$_'ları dahil) bu listeye giremez.
+     - schema zorunlu (target.schema'ya düşmez).
+     - Varsayılan dry_run: true -> sadece listeler. Silmek için dry_run: false verin.
+     - Her drop yine odi_safe_drop ile işaret kontrolünden geçer.
+   dbt run-operation odi_drop_work_tables --args '{schema: WRK}'                          # sadece listele
+   dbt run-operation odi_drop_work_tables --args '{schema: WRK, older_than_hours: 12, dry_run: false}'
 --------------------------------------------------------------------------- #}
-{% macro odi_drop_work_tables(schema=none, older_than_hours=0, include_errors=false, dry_run=false) %}
-  {{ return(adapter.dispatch('odi_drop_work_tables')(schema, older_than_hours, include_errors, dry_run)) }}
-{% endmacro %}
-
-{# Trino: odi_i_ / odi_c_ / odi_x_ (+ odi_e_) önekli tablolar; yaş filtresi yok (information_schema'da created yok) #}
-{% macro trino__odi_drop_work_tables(schema=none, older_than_hours=0, include_errors=false, dry_run=false) %}
-  {%- set sch = (schema or target.schema) | lower -%}
-  {%- set prefixes = ['odi\\_i\\_%', 'odi\\_c\\_%', 'odi\\_x\\_%'] + (['odi\\_e\\_%'] if include_errors else []) -%}
-  {% set q %}
-    select table_name from {{ target.database }}.information_schema.tables
-     where table_schema = '{{ sch }}'
-       and ( {% for p in prefixes %}table_name like '{{ p }}' escape '\'{{ ' or ' if not loop.last }}{% endfor %} )
-     order by 1
-  {% endset %}
-  {%- set names = run_query(q).columns[0].values() -%}
+{% macro odi_drop_work_tables(schema=none, older_than_hours=24, include_errors=false, dry_run=true) %}
+  {%- if not schema -%}
+    {%- do exceptions.raise_compiler_error("odi_drop_work_tables: schema parametresi zorunlu (ör. --args '{schema: WRK}').") -%}
+  {%- endif -%}
+  {%- set kinds = ['I$_', 'C$_', 'X$_'] + (['E$_'] if include_errors else []) -%}
+  {%- set prefixes = [] -%}
+  {%- for k in kinds -%}{%- do prefixes.append(odi_work_prefix(k)) -%}{%- endfor -%}
+  {%- set names = adapter.dispatch('odi_list_marked_work_tables')(schema, prefixes, older_than_hours | int) -%}
+  {%- set ctx = {'km': 'odi_drop_work_tables', 'step': 0} -%}
   {%- for n in names -%}
     {%- if dry_run -%}
-      {%- do log('[dry-run] drop ' ~ sch ~ '.' ~ n, info=True) -%}
+      {%- do log('[dry-run] drop ' ~ schema ~ '.' ~ n, info=True) -%}
     {%- else -%}
-      {%- do run_query('drop table if exists ' ~ target.database ~ '.' ~ sch ~ '.' ~ n) -%}
-      {%- do log('dropped ' ~ sch ~ '.' ~ n, info=True) -%}
+      {%- set rel = api.Relation.create(database=target.database, schema=odi_ident(schema), identifier=n, type='table') -%}
+      {%- do adapter.dispatch('odi_drop_marked_table')(rel) -%}
+      {%- do log('dropped ' ~ schema ~ '.' ~ n, info=True) -%}
     {%- endif -%}
   {%- endfor -%}
-  {%- do log((names | length) ~ ' work tablo ' ~ ('bulundu' if dry_run else 'silindi'), info=True) -%}
+  {%- do log((names | length) ~ ' işaretli work tablo ' ~ ('bulundu (dry-run, silinmedi)' if dry_run else 'silindi'), info=True) -%}
 {% endmacro %}
 
-{% macro default__odi_drop_work_tables(schema=none, older_than_hours=0, include_errors=false, dry_run=false) %}
-  {%- set sch = (schema or target.schema) | upper -%}
-  {%- set prefixes = ['I$\\_%', 'C$\\_%', 'X$\\_%'] + (['E$\\_%'] if include_errors else []) -%}
+{% macro default__odi_list_marked_work_tables(schema, prefixes, older_than_hours) %}
   {% set q %}
-    select o.object_name
-      from all_objects o
-     where o.owner = '{{ sch }}'
-       and o.object_type = 'TABLE'
-       and ( {% for p in prefixes %}o.object_name like '{{ p }}' escape '\'{{ ' or ' if not loop.last }}{% endfor %} )
+    select t.table_name
+      from all_tables t
+      join all_tab_comments c on c.owner = t.owner and c.table_name = t.table_name
+      join all_objects o      on o.owner = t.owner and o.object_name = t.table_name and o.object_type = 'TABLE'
+     where t.owner = '{{ schema | upper }}'
+       and t.temporary = 'N'
+       and c.comments = '{{ odi_work_marker() }}'
+       and ( {% for p in prefixes %}substr(t.table_name, 1, {{ p | length }}) = '{{ p | upper }}'{{ ' or ' if not loop.last }}{% endfor %} )
        and o.created < sysdate - {{ older_than_hours }} / 24
-       and not exists ( select 1 from all_tables t
-                         where t.owner = o.owner and t.table_name = o.object_name and t.temporary = 'Y' )
      order by 1
   {% endset %}
-  {%- set names = run_query(q).columns[0].values() -%}
-  {%- for n in names -%}
-    {%- if dry_run -%}
-      {%- do log('[dry-run] drop ' ~ sch ~ '.' ~ n, info=True) -%}
-    {%- else -%}
-      {%- do run_query('DROP TABLE ' ~ sch ~ '."' ~ n ~ '" PURGE') -%}
-      {%- do log('dropped ' ~ sch ~ '.' ~ n, info=True) -%}
-    {%- endif -%}
-  {%- endfor -%}
-  {%- do log((names | length) ~ ' work tablo ' ~ ('bulundu' if dry_run else 'silindi'), info=True) -%}
+  {{ return(run_query(q).columns[0].values() | list) }}
+{% endmacro %}
+
+{# Trino: oluşturma zamanı information_schema'da yok -> yaş filtresi uygulanmaz #}
+{% macro trino__odi_list_marked_work_tables(schema, prefixes, older_than_hours) %}
+  {% set q %}
+    select c.table_name
+      from system.metadata.table_comments c
+     where c.catalog_name = '{{ target.database | lower }}'
+       and c.schema_name  = '{{ schema | lower }}'
+       and c.comment      = '{{ odi_work_marker() }}'
+       and ( {% for p in prefixes %}substr(c.table_name, 1, {{ p | length }}) = '{{ p | lower }}'{{ ' or ' if not loop.last }}{% endfor %} )
+     order by 1
+  {% endset %}
+  {{ return(run_query(q).columns[0].values() | list) }}
+{% endmacro %}
+
+{# run-operation'da config/this yok; işaret kontrolü yine yapılır #}
+{% macro default__odi_drop_marked_table(rel) %}
+  {%- set o = rel.schema | upper -%}
+  {%- set t = rel.identifier | upper -%}
+  {% set q %}
+DECLARE
+  v_cmt VARCHAR2(4000);
+BEGIN
+  SELECT MAX(comments) INTO v_cmt FROM all_tab_comments WHERE owner = '{{ o }}' AND table_name = '{{ t }}';
+  IF v_cmt IS NULL OR v_cmt <> '{{ odi_work_marker() }}' THEN
+    RAISE_APPLICATION_ERROR(-20901, 'odi_dbt: {{ o }}.{{ t }} isaretsiz, DROP EDILMEDI.');
+  END IF;
+  EXECUTE IMMEDIATE 'DROP TABLE "{{ o }}"."{{ t }}" PURGE';
+END;
+  {% endset %}
+  {%- do run_query(q) -%}
+{% endmacro %}
+
+{% macro trino__odi_drop_marked_table(rel) %}
+  {%- if odi_trn_table_comment(rel) != odi_work_marker() -%}
+    {%- do exceptions.raise_compiler_error('odi_dbt: ' ~ rel ~ ' işaretsiz, DROP EDİLMEDİ.') -%}
+  {%- endif -%}
+  {%- do run_query('drop table ' ~ rel) -%}
 {% endmacro %}
 
 {# ---------------------------------------------------------------------------

@@ -13,6 +13,8 @@
  ÇALIŞTIR : dbt run -s iu_basic_ckm
             dbt run -s iu_basic_ckm --vars '{max_err: 0}'   -> hata eşiği aşılır, model fail, target değişmez
             dbt run -s iu_basic_ckm --full-refresh          -> truncate + hepsi insert
+                                                               (odi_allow_full_refresh: true olduğu için izinli;
+                                                                bu config yoksa --full-refresh reddedilir)
 ================================================================================
 @setup
 CREATE TABLE t_iu (
@@ -45,6 +47,7 @@ update yok (idempotent) :: select sum(rows_affected) from odi_step_log where ses
     odi_ckm_conditions = {'CHK_SEGMENT': "segment in ('R','C')"},
     odi_ckm_references = {'FK_BRANCH': {'cols': ['branch_cd'], 'ref_table': 'D_BRANCH'}},
     odi_ckm_max_errors = var('max_err', none),
+    odi_allow_full_refresh = true,
     odi_audit_insert   = {'ins_dt': 'sysdate'},
     odi_audit_update   = {'upd_dt': 'sysdate'}
 ) }}

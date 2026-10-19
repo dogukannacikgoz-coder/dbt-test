@@ -36,6 +36,7 @@ sadece 7 işlendi :: select sum(rows_affected) from odi_step_log where sess_no =
     odi_ckm_conditions = {'CHK_SEGMENT': "segment in ('R','C')"},
     odi_ckm_references = {'FK_BRANCH': {'cols': ['branch_cd'], 'ref_table': 'd_branch'}},
     odi_ckm_max_errors = var('max_err', none),
+    odi_allow_full_refresh = true,
     odi_audit_insert   = {'ins_ts': 'localtimestamp'},
     odi_audit_update   = {'upd_ts': 'localtimestamp'}
 ) }}

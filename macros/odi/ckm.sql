@@ -42,7 +42,7 @@ select cast(null as varchar2(64))   as ODI_ROW_ID,
  where 1 = 0
 {% endmacro %}
 {% macro trino__odi_ckm_create_error_sql(e_rel, flow_rel, cols) %}
-create table {{ e_rel }} as
+create table {{ e_rel }}{{ odi_trn_comment_clause() }} as
 select cast(null as varchar)       as ODI_ROW_ID,
        cast(null as varchar)       as ERR_TYPE,
        cast(null as varchar)       as ERR_MESS,
@@ -91,6 +91,7 @@ delete from {{ flow_rel }}
     {%- if config.get('odi_ckm_create_error_table', true) -%}
       {%- set ce = odi_ckm_create_error_sql(e_rel, flow_rel, cols) -%}
       {%- do odi_exec(ctx, 'Create error table', ce, auto_begin=False) -%}
+      {%- do odi_mark_work_table(ctx, e_rel, 'E$ (error)') -%}
     {%- else -%}
       {%- do exceptions.raise_compiler_error('Error tablosu ' ~ e_rel ~ ' yok (odi_ckm_create_error_table=false).') -%}
     {%- endif -%}

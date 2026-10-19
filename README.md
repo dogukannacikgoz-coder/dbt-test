@@ -14,6 +14,22 @@ Tüm kullanım kılavuzu: "odi_dbt — dbt ile ODI tarzı ETL Framework Kılavuz
 | `odi_partition_exchange` | IKM Oracle Partition Exchange Load |
 Her yöntemde: `odi_lkm` (C$ staging), `odi_flow_control` (CKM + recycle), `odi_partition`, step log.
 
+## Güvenlik (DWH şemasında çalışırken)
+Framework, binlerce tablonun olduğu bir şemada kendi yaratmadığı hiçbir tabloya DROP / TRUNCATE / DELETE atamaz:
+| Kural | Nasıl |
+|---|---|
+| Şema taraması ile drop yok | Hiçbir makro "şemadaki tüm tabloları" listeleyip silmez. |
+| Work tablo drop'u sadece işaretli tabloya | `I$_/C$_/X$_` yaratılınca `COMMENT 'ODI_DBT_WORK'` alır. Drop öncesi işaret kontrol edilir; işaretsizse model fail olur, tabloya dokunulmaz (ODI'ın kendi `I$_` tabloları dahil). `E$_` otomatik drop edilmez. |
+| Work tablo adı önek zorunlu | `odi_flow_table / odi_error_table / odi_exchange_table / odi_lkm_table` önekle başlamıyorsa ya da target'ın kendisiyse derlemede durur. İstisna yok. |
+| `--full-refresh` opt-in | Sadece `odi_allow_full_refresh: true` olan modelde TRUNCATE yapar; diğerleri hiçbir SQL çalıştırmadan fail olur. |
+| Boş kaynak koruması | `odi_delete_missing` / `close_missing` açıkken kaynak (flow) `odi_delete_missing_min_rows` (default 1) satırdan azsa target'a dokunmadan durur. |
+| `odi_drop_work_tables` | `schema` zorunlu, varsayılan dry-run, sadece `ODI_DBT_WORK` işaretli tabloları görür. |
+| `test_runner.py` | Sadece `ODI_TEST*` şemasında koşar; sadece kendi script'lerinde adı geçen ve `ODI_DBT_TEST` işaretli tabloları siler; sequence silmez. |
+
+TRUNCATE / partition truncate yalnızca model config'inde açıkça istenirse (`odi_truncate`, `odi_partition.strategy: truncate`) ve yalnızca o modelin target'ına yapılır.
+Work şeması dbt kullanıcısının kendi şeması değilse `COMMENT ANY TABLE` yetkisi gerekir (ya da `odi_flow_mode: existing`).
+ODI ile aynı work şemasını paylaşıyorsanız önekleri ayırabilirsiniz: `vars: {odi_work_prefixes: {'I$_': 'DI$_', 'C$_': 'DC$_', 'E$_': 'DE$_', 'X$_': 'DX$_'}}`.
+
 ## Hızlı başlangıç
 ```bash
 docker run -d --name ora -p 1521:1521 -e ORACLE_PASSWORD=sys123 \

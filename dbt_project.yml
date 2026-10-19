@@ -10,6 +10,8 @@ macro-paths: ["macros"]
 vars:
   # her step ODI_STEP_LOG'a yazılır (tablo sql/00_sources.sql'de; prod'da PDM ile açın)
   odi_log_table: ODI_STEP_LOG
+  # ODI ile aynı work şemasını paylaşıyorsanız work tablo öneklerini ayırın (opsiyonel):
+  # odi_work_prefixes: {'I$_': 'DI$_', 'C$_': 'DC$_', 'E$_': 'DE$_', 'X$_': 'DX$_'}
   # runtime parametre tablosu (AKIS_PARAM). Tanımlıysa odi_param() --vars yoksa buradan okur.
   # odi_param_table: ETL.AKIS_PARAM
   # odi_param_name_col: PARAM_ADI
