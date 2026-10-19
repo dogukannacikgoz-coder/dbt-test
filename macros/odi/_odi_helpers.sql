@@ -40,11 +40,13 @@
 {% macro default__odi_ident(s) %}{{ return(s | upper) }}{% endmacro %}
 {% macro trino__odi_ident(s) %}{{ return(s | lower) }}{% endmacro %}
 
-{# work tablo önekleri: Trino/Iceberg'de '$' metadata tablosu ayırıcısıdır (t$snapshots), kullanılamaz #}
+{# work tablo önekleri: Trino/Iceberg'de '$' metadata tablosu ayırıcısıdır (t$snapshots), kullanılamaz.
+   ODI'ın kendi I$_/E$_ tablolarıyla aynı şemayı paylaşıyorsanız önekleri değiştirebilirsiniz:
+     vars: {odi_work_prefixes: {'I$_': 'DI$_', 'C$_': 'DC$_', 'E$_': 'DE$_', 'X$_': 'DX$_'}} #}
 {% macro odi_work_prefix(p) %}{{ return(adapter.dispatch('odi_work_prefix')(p)) }}{% endmacro %}
-{% macro default__odi_work_prefix(p) %}{{ return(p) }}{% endmacro %}
+{% macro default__odi_work_prefix(p) %}{{ return(var('odi_work_prefixes', {}).get(p, p)) }}{% endmacro %}
 {% macro trino__odi_work_prefix(p) %}
-  {{ return({'I$_': 'odi_i_', 'C$_': 'odi_c_', 'E$_': 'odi_e_', 'X$_': 'odi_x_'}.get(p, p)) }}
+  {{ return(var('odi_work_prefixes', {}).get(p, {'I$_': 'odi_i_', 'C$_': 'odi_c_', 'E$_': 'odi_e_', 'X$_': 'odi_x_'}.get(p, p))) }}
 {% endmacro %}
 
 {# şimdiki zaman: E$ CHECK_DATE ve step log #}
@@ -70,6 +72,7 @@
 {% endmacro %}
 
 {% macro odi_ctx(km_name) %}
+  {%- do odi_preflight() -%}
   {{ return({'km': km_name, 'step': 0}) }}
 {% endmacro %}
 
@@ -102,6 +105,7 @@
     {%- set suffix = ('_' ~ local_md5(invocation_id)[:6]) if (config.get('odi_unique_temp_names', false) and prefix != 'E$_') else '' -%}
     {%- set ident = (odi_work_prefix(prefix) ~ this.identifier)[:maxlen - (suffix | length)] ~ suffix -%}
   {%- endif -%}
+  {%- do odi_check_work_name(prefix, ws, ident) -%}
   {{ return(this.incorporate(path={'schema': odi_ident(ws), 'identifier': odi_ident(ident)}, type='table')) }}
 {% endmacro %}
 
@@ -219,15 +223,7 @@
 {# Trino autocommit: her statement kendi commit'i #}
 {% macro trino__odi_commit(ctx) %}{% endmacro %}
 
-{% macro odi_drop_sql(rel) %}{{ return(adapter.dispatch('odi_drop_sql')(rel)) }}{% endmacro %}
-{% macro trino__odi_drop_sql(rel) %}{{ return('drop table if exists ' ~ rel) }}{% endmacro %}
-{% macro default__odi_drop_sql(rel) %}
-BEGIN
-  EXECUTE IMMEDIATE 'DROP TABLE {{ rel }} PURGE';
-EXCEPTION WHEN OTHERS THEN
-  IF SQLCODE != -942 THEN RAISE; END IF;
-END;
-{% endmacro %}
+{# DROP sadece odi_safe_drop ile (odi_safety.sql): işaretsiz tabloya dokunmaz #}
 
 {% macro odi_gather_stats(ctx, rel, force=false) %}
   {%- if force or config.get('odi_analyze_flow', false) -%}
@@ -268,6 +264,7 @@ END;
    Work tablo yükleyici (C$ / I$ / X$ için ortak)
    odi_flow_mode:
      'table'    -> ODI default: drop + create + insert (work şemada CREATE TABLE yetkisi ister)
+                   drop sadece ODI_DBT_WORK işaretli tabloya yapılır (odi_safe_drop)
      'existing' -> PDM ile önceden açılmış tablo (permanent veya GTT ON COMMIT PRESERVE ROWS):
                    delete + insert; DDL yok
      'none'     -> (sadece odi_merge) I$ kullanılmaz; diğer work tabloları 'table' gibi davranır
@@ -284,7 +281,7 @@ END;
   {%- set nolog = config.get('odi_flow_table_options', 'nologging' if config.get('odi_flow_nologging', true) else '') -%}
 
   {%- if mode == 'table' -%}
-    {%- do odi_exec(ctx, 'Drop ' ~ label ~ ' table', odi_drop_sql(rel), auto_begin=False) -%}
+    {%- do odi_safe_drop(ctx, rel, label) -%}
     {%- set create_sql -%}
 create table {{ rel }} {{ nolog }} as
 {%- if create_from %}
@@ -296,6 +293,7 @@ select odi_q.*{{ ", cast('I' as char(1)) as IND_UPDATE" if with_ind_update }}
 {%- endif %}
     {%- endset -%}
     {%- do odi_exec(ctx, 'Create ' ~ label ~ ' table', create_sql, auto_begin=False) -%}
+    {%- do odi_mark_work_table(ctx, rel, label) -%}
   {%- elif mode == 'existing' -%}
     {%- do odi_exec(ctx, 'Delete ' ~ label ~ ' table (pre-created)', 'delete from ' ~ rel) -%}
   {%- else -%}
@@ -320,7 +318,7 @@ select {{ odi_hint(sel_hint) }}
     {%- set mode = odi_work_mode() -%}
     {%- for r in rels -%}
       {%- if mode == 'table' -%}
-        {%- do odi_exec(ctx, 'Drop ' ~ r.identifier, odi_drop_sql(r), auto_begin=False) -%}
+        {%- do odi_safe_drop(ctx, r, r.identifier) -%}
       {%- else -%}
         {%- do odi_exec(ctx, 'Delete ' ~ r.identifier, 'delete from ' ~ r) -%}
         {%- do odi_commit(ctx) -%}
@@ -347,12 +345,14 @@ select {{ odi_hint(sel_hint) }}
 {# ---------------------------------------------------------------------------
    Target hazırlığı:
      - yoksa ve odi_create_target_table: true ise yarat (from_sql'in kolonları + audit kolonları)
-     - --full-refresh / odi_truncate  -> TRUNCATE
+     - --full-refresh (sadece odi_allow_full_refresh: true) / odi_truncate  -> TRUNCATE
+     - odi_delete_missing / close_missing açıksa önce kaynak boş mu kontrolü
      - odi_delete_all                 -> DELETE
      - odi_partition                  -> partition'ı garanti et + strategy (truncate/delete/none)
    from_sql: tablo adı veya '( select ... )'
 --------------------------------------------------------------------------- #}
 {% macro odi_prepare_target(ctx, target, from_sql, cols, extra_cols_sql='') %}
+  {%- do odi_guard_source_rows(ctx, from_sql) -%}
   {%- if not odi_table_exists(target) -%}
     {%- if config.get('odi_create_target_table', false) -%}
       {%- set ct -%}

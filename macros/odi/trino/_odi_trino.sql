@@ -17,16 +17,16 @@
 
 {# ---------------------------------------------------------------------------
    Work tablo (flow / LKM staging). Satır id'si (ODI_ROW_ID) her zaman eklenir.
-     table    -> drop if exists + CTAS (veriyle tek statement)
+     table    -> güvenli drop (sadece ODI_DBT_WORK işaretli) + CTAS ... COMMENT 'ODI_DBT_WORK' (tek statement)
      existing -> önceden açılmış tablo: delete + insert
 --------------------------------------------------------------------------- #}
 {% macro odi_trn_load_work_table(ctx, rel, src_sql, cols, label) %}
   {%- set mode = config.get('odi_flow_mode', 'table') | lower -%}
   {%- set props = config.get('odi_trino_work_table_properties', none) -%}
   {%- if mode in ['table', 'none'] -%}
-    {%- do odi_exec(ctx, 'Drop ' ~ label ~ ' table', odi_drop_sql(rel)) -%}
+    {%- do odi_safe_drop(ctx, rel, label) -%}
     {%- set q -%}
-create table {{ rel }}{{ odi_trn_with(props) }} as
+create table {{ rel }}{{ odi_trn_comment_clause() }}{{ odi_trn_with(props) }} as
 select cast(uuid() as varchar) as ODI_ROW_ID,
        {{ odi_col_list(cols, 'odi_q') }}
   from ( {{ src_sql }} ) odi_q
@@ -55,7 +55,7 @@ select cast(uuid() as varchar), {{ odi_col_list(cols, 'odi_q') }}
       {%- if mode == 'existing' -%}
         {%- do odi_exec(ctx, 'Delete ' ~ r.identifier, 'delete from ' ~ r) -%}
       {%- else -%}
-        {%- do odi_exec(ctx, 'Drop ' ~ r.identifier, odi_drop_sql(r)) -%}
+        {%- do odi_safe_drop(ctx, r, r.identifier) -%}
       {%- endif -%}
     {%- endfor -%}
   {%- endif -%}
@@ -76,10 +76,11 @@ select cast(uuid() as varchar), {{ odi_col_list(cols, 'odi_q') }}
 {# ---------------------------------------------------------------------------
    Target hazırlığı
      yoksa: odi_create_target_table -> CTAS (odi_trino_table_properties ile, ör. partitioning)
-     --full-refresh / odi_truncate / odi_delete_all -> DELETE FROM (Iceberg'de metadata işlemi)
+     --full-refresh (sadece odi_allow_full_refresh: true) / odi_truncate / odi_delete_all -> DELETE FROM
      odi_partition: truncate | delete -> DELETE ... WHERE dönem ; none -> bir şey yapma
 --------------------------------------------------------------------------- #}
 {% macro odi_trn_prepare_target(ctx, target, from_sql, cols, extra_cols_sql='') %}
+  {%- do odi_guard_source_rows(ctx, from_sql) -%}
   {%- if not odi_table_exists(target) -%}
     {%- if config.get('odi_create_target_table', false) -%}
       {%- set q -%}
