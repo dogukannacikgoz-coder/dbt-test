@@ -40,7 +40,7 @@ değişmedi :: select count(*), sum(curr_flag) from t_scd => [(7, 6)]
     odi_ckm_conditions = {'CHK_SEGMENT': "segment in ('R','C')"},
     odi_scd = {
       'surrogate_key':       'cust_sk',
-      'surrogate_expr':      var('odi_name_prefix', '') ~ 'SEQ_T_SCD.NEXTVAL',
+      'surrogate_expr':      target.schema ~ '.' ~ var('odi_name_prefix', '') ~ 'SEQ_T_SCD.NEXTVAL',
       'natural_key':         ['cust_no'],
       'overwrite_on_change': ['cust_name', 'email'],
       'add_row_on_change':   ['segment', 'city'],

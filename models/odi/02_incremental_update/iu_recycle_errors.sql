@@ -32,7 +32,7 @@ E$'ta 7 kalmadı :: select count(*) from "E$_T_IU_RECYCLE" where cust_no = 7 => 
     unique_key         = 'cust_no',
     odi_flow_control   = true,
     odi_recycle_errors = true,
-    odi_ckm_references = {'FK_BRANCH': {'cols': ['branch_cd'], 'ref_table': var('odi_name_prefix', '') ~ 'D_BRANCH'}}
+    odi_ckm_references = {'FK_BRANCH': {'cols': ['branch_cd'], 'ref_table': target.schema ~ '.' ~ var('odi_name_prefix', '') ~ 'D_BRANCH'}}
 ) }}
 
 select cust_no, cust_name, segment, city, email, branch_cd, amount, status
