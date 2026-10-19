@@ -8,12 +8,18 @@
 SET DEFINE ON
 SET VERIFY OFF
 DEFINE P = DOA_
+DEFINE S = GLOBAL_DWH
+-- Tüm şemasız isimler bu şemaya gider (kendi kullanıcınla bağlansan bile). Şemanın kendisiyle bağlıysan etkisiz.
+ALTER SESSION SET CURRENT_SCHEMA = &S.;
 
 
 WHENEVER SQLERROR EXIT
 BEGIN
   IF LENGTH('&P.') < 3 OR SUBSTR('&P.', -1) <> '_' OR '&P.' <> UPPER('&P.') THEN
     RAISE_APPLICATION_ERROR(-20900, 'Önek hatalı: en az 3 karakter, büyük harf, _ ile bitmeli. Şu an: &P.');
+  END IF;
+  IF SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA') <> UPPER('&S.') THEN
+    RAISE_APPLICATION_ERROR(-20900, 'Aktif şema &S. değil: ' || SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA'));
   END IF;
 END;
 /
@@ -106,7 +112,7 @@ select cust_no from &P.T_MG_FLOW order by 1;
 PROMPT -- E$ (bu run)   ==> beklenen: 6 | 8
 select cust_no from "E$_&P.T_MG_FLOW" where odi_sess_no = (select max(sess_no) keep (dense_rank last order by log_date) from &P.ODI_STEP_LOG where model_name like '%.&P.T_MG_FLOW') order by 1;
 PROMPT -- I$ artığı kalmadı   ==> beklenen: 0
-select count(*) from user_tables where table_name like 'I$\_&P.T\_MG\_FLOW%' escape '\';
+select count(*) from all_tables where owner = sys_context('USERENV', 'CURRENT_SCHEMA') and table_name like 'I$\_&P.T\_MG\_FLOW%' escape '\';
 
 PROMPT ================ scd_close_missing  (&P.T_SCD_SNAP)
 PROMPT -- toplam / current   ==> beklenen: 6, 4
@@ -128,9 +134,9 @@ PROMPT ================ pt_daily_exchange  (&P.T_TXN_DAILY_X)
 PROMPT -- toplam   ==> beklenen: 5
 select count(*) from &P.T_TXN_DAILY_X;
 PROMPT -- iki günlük partition   ==> beklenen: 2
-select count(*) from user_tab_partitions where table_name = '&P.T_TXN_DAILY_X' and partition_name in ('P20261001', 'P20261002');
+select count(*) from all_tab_partitions where table_owner = sys_context('USERENV', 'CURRENT_SCHEMA') and table_name = '&P.T_TXN_DAILY_X' and partition_name in ('P20261001', 'P20261002');
 PROMPT -- local index usable   ==> beklenen: 0
-select count(*) from user_ind_partitions where index_name = '&P.IX_T_TXN_DAILY_X_CUST' and status <> 'USABLE';
+select count(*) from all_ind_partitions where index_owner = sys_context('USERENV', 'CURRENT_SCHEMA') and index_name = '&P.IX_T_TXN_DAILY_X_CUST' and status <> 'USABLE';
 
 PROMPT ================ pt_daily_truncate  (&P.T_TXN_DAILY_TRUNC)
 PROMPT -- toplam   ==> beklenen: 5
@@ -148,7 +154,7 @@ PROMPT ================ lkm_staging  (&P.T_LKM_CUST)
 PROMPT -- satır   ==> beklenen: 8
 select count(*) from &P.T_LKM_CUST;
 PROMPT -- C$ silindi   ==> beklenen: 0
-select count(*) from user_tables where table_name = 'C$_&P.T_LKM_CUST';
+select count(*) from all_tables where owner = sys_context('USERENV', 'CURRENT_SCHEMA') and table_name = 'C$_&P.T_LKM_CUST';
 
 PROMPT ================ cust_fin_daily  (&P.DM_CUST_FIN_DAILY)
 PROMPT -- satır   ==> beklenen: 5

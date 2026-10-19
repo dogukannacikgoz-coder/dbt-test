@@ -8,12 +8,18 @@
 SET DEFINE ON
 SET VERIFY OFF
 DEFINE P = DOA_
+DEFINE S = GLOBAL_DWH
+-- Tüm şemasız isimler bu şemaya gider (kendi kullanıcınla bağlansan bile). Şemanın kendisiyle bağlıysan etkisiz.
+ALTER SESSION SET CURRENT_SCHEMA = &S.;
 
 
 WHENEVER SQLERROR EXIT
 BEGIN
   IF LENGTH('&P.') < 3 OR SUBSTR('&P.', -1) <> '_' OR '&P.' <> UPPER('&P.') THEN
     RAISE_APPLICATION_ERROR(-20900, 'Önek hatalı: en az 3 karakter, büyük harf, _ ile bitmeli. Şu an: &P.');
+  END IF;
+  IF SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA') <> UPPER('&S.') THEN
+    RAISE_APPLICATION_ERROR(-20900, 'Aktif şema &S. değil: ' || SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA'));
   END IF;
 END;
 /
@@ -92,7 +98,7 @@ PROMPT ================ pt_daily_exchange  (&P.T_TXN_DAILY_X)
 PROMPT -- 10-01   ==> beklenen: 3
 select count(*) from &P.T_TXN_DAILY_X where txn_date = date '2026-10-01';
 PROMPT -- partition eklendi   ==> beklenen: 1
-select count(*) from user_tab_partitions where table_name = '&P.T_TXN_DAILY_X' and partition_name = 'P20261001';
+select count(*) from all_tab_partitions where table_owner = sys_context('USERENV', 'CURRENT_SCHEMA') and table_name = '&P.T_TXN_DAILY_X' and partition_name = 'P20261001';
 
 PROMPT ================ pt_daily_truncate  (&P.T_TXN_DAILY_TRUNC)
 PROMPT -- 10-01   ==> beklenen: 3
