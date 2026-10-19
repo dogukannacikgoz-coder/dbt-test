@@ -45,13 +45,13 @@ T_IU ile fark yok :: select count(*) from (select cust_no, city, email, status f
     alias                      = 'T_IU_GTT',
     unique_key                 = 'cust_no',
     odi_flow_mode              = 'existing',
-    odi_flow_table             = 'I$_T_IU_GTT',
-    odi_error_table            = 'E$_T_IU_GTT',
+    odi_flow_table             = 'I$_' ~ var('odi_name_prefix', '') ~ 'T_IU_GTT',
+    odi_error_table            = 'E$_' ~ var('odi_name_prefix', '') ~ 'T_IU_GTT',
     odi_ckm_create_error_table = false,
     odi_flow_control           = true,
     odi_ckm_not_null           = ['cust_name'],
     odi_ckm_conditions         = {'CHK_SEGMENT': "segment in ('R','C')"},
-    odi_ckm_references         = {'FK_BRANCH': {'cols': ['branch_cd'], 'ref_table': 'D_BRANCH'}},
+    odi_ckm_references         = {'FK_BRANCH': {'cols': ['branch_cd'], 'ref_table': var('odi_name_prefix', '') ~ 'D_BRANCH'}},
     odi_audit_insert           = {'ins_dt': 'sysdate'},
     odi_audit_update           = {'upd_dt': 'sysdate'}
 ) }}

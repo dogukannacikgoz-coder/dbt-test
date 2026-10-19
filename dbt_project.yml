@@ -8,8 +8,13 @@ model-paths: ["models"]
 macro-paths: ["macros"]
 
 vars:
-  # her step ODI_STEP_LOG'a yazılır (tablo sql/00_sources.sql'de; prod'da PDM ile açın)
-  odi_log_table: ODI_STEP_LOG
+  # Paylaşılan sandbox şemasında isim çakışmasın diye tüm test nesnelerine önek (macros/project/generate_alias_name.sql)
+  #   export ODI_NAME_PREFIX=DOA_    (kendine özgü, şemada başka kimsenin kullanmadığı bir önek seç)
+  odi_name_prefix: "{{ env_var('ODI_NAME_PREFIX', '') }}"
+  # true: önek verilmeden hiçbir model çalışmaz (yanlışlıkla önek'siz T_IU gibi ortak isimlere yazmayı engeller)
+  odi_require_name_prefix: true
+  # her step ODI_STEP_LOG'a yazılır (sandbox'ta <önek>ODI_STEP_LOG; sql/sandbox/01_create.sql açar)
+  odi_log_table: "{{ env_var('ODI_NAME_PREFIX', '') }}ODI_STEP_LOG"
   # ODI ile aynı work şemasını paylaşıyorsanız work tablo öneklerini ayırın (opsiyonel):
   # odi_work_prefixes: {'I$_': 'DI$_', 'C$_': 'DC$_', 'E$_': 'DE$_', 'X$_': 'DX$_'}
   # runtime parametre tablosu (AKIS_PARAM). Tanımlıysa odi_param() --vars yoksa buradan okur.

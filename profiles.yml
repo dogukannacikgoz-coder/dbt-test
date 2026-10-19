@@ -9,7 +9,7 @@ odi_dbt:
       database: "{{ env_var('ORA_SERVICE', 'FREEPDB1') }}"
       user: "{{ env_var('ORA_USER', 'odi_test') }}"
       password: "{{ env_var('ORA_PWD', 'odi_test') }}"
-      schema: "{{ env_var('ORA_USER', 'odi_test') | upper }}"
+      schema: "{{ env_var('ORA_SCHEMA', env_var('ORA_USER', 'odi_test')) | upper }}"
       protocol: tcp
       threads: 1
     # dbt run --target trino   (Iceberg catalog; lokal kurulum: docker/trino/docker-compose.yml)

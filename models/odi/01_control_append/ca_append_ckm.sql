@@ -31,7 +31,7 @@ E$ (bu run) :: select cust_no from "E$_T_CA_APPEND_CLEAN" where odi_sess_no = :s
     odi_flow_control   = true,
     odi_ckm_not_null   = ['cust_name'],
     odi_ckm_conditions = {'CHK_SEGMENT': "segment in ('R','C')"},
-    odi_ckm_references = {'FK_BRANCH': {'cols': ['branch_cd'], 'ref_table': 'D_BRANCH'}},
+    odi_ckm_references = {'FK_BRANCH': {'cols': ['branch_cd'], 'ref_table': var('odi_name_prefix', '') ~ 'D_BRANCH'}},
     odi_audit_insert   = {'load_dt': 'sysdate'}
 ) }}
 

@@ -32,6 +32,15 @@
    Model başında (odi_ctx içinden) çalışan ön kontroller — hiçbir SQL çalışmadan önce
 --------------------------------------------------------------------------- #}
 {% macro odi_preflight() %}
+  {#- paylaşılan şema koruması: önek zorunluysa ve target önekli değilse hiçbir şey yapma -#}
+  {%- set pfx = var('odi_name_prefix', '') -%}
+  {%- if var('odi_require_name_prefix', false) and not pfx -%}
+    {%- do exceptions.raise_compiler_error(this ~ ": odi_require_name_prefix açık ama önek yok. "
+          ~ "export ODI_NAME_PREFIX=<önekin>_ verin (paylaşılan şemada başkasının tablosuna yazmamak için). Hiçbir tabloya dokunulmadı.") -%}
+  {%- endif -%}
+  {%- if pfx and not (this.identifier | upper).startswith(pfx | upper) -%}
+    {%- do exceptions.raise_compiler_error(this ~ ": target adı '" ~ pfx ~ "' önekiyle başlamıyor. Hiçbir tabloya dokunulmadı.") -%}
+  {%- endif -%}
   {%- if execute and should_full_refresh() and not config.get('odi_allow_full_refresh', false) -%}
     {%- do exceptions.raise_compiler_error(
           this ~ ": --full-refresh bu modelde kapalı (TRUNCATE target olurdu). "

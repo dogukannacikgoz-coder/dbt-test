@@ -30,6 +30,11 @@ TRUNCATE / partition truncate yalnızca model config'inde açıkça istenirse (`
 Work şeması dbt kullanıcısının kendi şeması değilse `COMMENT ANY TABLE` yetkisi gerekir (ya da `odi_flow_mode: existing`).
 ODI ile aynı work şemasını paylaşıyorsanız önekleri ayırabilirsiniz: `vars: {odi_work_prefixes: {'I$_': 'DI$_', 'C$_': 'DC$_', 'E$_': 'DE$_', 'X$_': 'DX$_'}}`.
 
+## Paylaşılan sandbox şemasında elle test
+Ayrı şema açamıyorsan: `sql/sandbox/README.md`. Tüm nesneler kendi önekinle (`ODI_NAME_PREFIX`, ör. `DOA_`) yaratılır,
+dbt sadece önekli tablolara yazar, önek verilmezse hiçbir model çalışmaz. dbt-oracle'ın şemadaki her şeyi silen
+`drop_schema` makrosu projede kilitli (`macros/project/guard_destructive.sql`).
+
 ## Hızlı başlangıç
 ```bash
 docker run -d --name ora -p 1521:1521 -e ORACLE_PASSWORD=sys123 \
