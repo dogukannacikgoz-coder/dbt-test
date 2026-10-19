@@ -52,6 +52,6 @@ dbt run --profiles-dir . -s iu_basic_ckm       --vars "{load_date: '2026-10-01'}
   `CREATE ANY TABLE` ve işaret için `COMMENT ANY TABLE` gerekir. `00_precheck.sql` yetkileri listeler.
 - `odi_parallel_dml` kapalı; ortak ortamı yormamak için örnek veri küçük (onlarca satır).
 - `--full-refresh` sadece `iu_basic_ckm`'de açık. Diğer modellerde model hiçbir şey yapmadan fail olur.
-- `odi_drop_work_tables` run-operation'ını sandbox'ta çalıştırmanıza gerek yok. Temizlik `99_drop.sql` ile.
+- `odi_drop_work_tables` run-operation'ını sandbox'ta çalıştırmana gerek yok. Temizlik `99_drop.sql` ile.
 - Bu dosyalar `scripts/gen_sandbox_sql.py` ile model başlıklarından üretilir. Model başlıklarındaki
   `@setup` DDL'leri öneksizdir; sandbox'ta onları değil buradaki scriptleri kullan.
