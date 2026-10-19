@@ -8,11 +8,17 @@
 SET DEFINE ON
 SET VERIFY OFF
 DEFINE P = DOA_
+DEFINE S = GLOBAL_DWH
+-- Tüm şemasız isimler bu şemaya gider (kendi kullanıcınla bağlansan bile). Şemanın kendisiyle bağlıysan etkisiz.
+ALTER SESSION SET CURRENT_SCHEMA = &S.;
 
 WHENEVER SQLERROR EXIT
 BEGIN
   IF LENGTH('&P.') < 3 OR SUBSTR('&P.', -1) <> '_' OR '&P.' <> UPPER('&P.') THEN
     RAISE_APPLICATION_ERROR(-20900, 'Önek hatalı: en az 3 karakter, büyük harf, _ ile bitmeli. Şu an: &P.');
+  END IF;
+  IF SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA') <> UPPER('&S.') THEN
+    RAISE_APPLICATION_ERROR(-20900, 'Aktif şema &S. değil: ' || SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA'));
   END IF;
 END;
 /
@@ -20,13 +26,14 @@ WHENEVER SQLERROR CONTINUE
 
 PROMPT == Bu önekle başlayan nesne var mı? (BOŞ dönmeli. Dönüyorsa başka önek seç.)
 SELECT object_type, object_name, created
-  FROM user_objects
- WHERE SUBSTR(object_name, 1, LENGTH('&P.')) = '&P.'
-    OR SUBSTR(object_name, 1, 3 + LENGTH('&P.')) IN ('I$_&P.', 'C$_&P.', 'X$_&P.', 'E$_&P.')
+  FROM all_objects
+ WHERE owner = SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA')
+   AND (SUBSTR(object_name, 1, LENGTH('&P.')) = '&P.'
+    OR SUBSTR(object_name, 1, 3 + LENGTH('&P.')) IN ('I$_&P.', 'C$_&P.', 'X$_&P.', 'E$_&P.'))
  ORDER BY 2;
 
 PROMPT == Yetkiler (CREATE TABLE / CREATE SEQUENCE olmalı)
 SELECT privilege FROM session_privs WHERE privilege IN ('CREATE TABLE', 'CREATE SEQUENCE', 'CREATE ANY TABLE', 'COMMENT ANY TABLE') ORDER BY 1;
 
-PROMPT == Bağlı kullanıcı / aktif şema (ikisi aynı olmalı; farklıysa ORA_SCHEMA ver)
+PROMPT == Bağlı kullanıcı / aktif şema (aktif şema &S. olmalı; kullanıcı farklıysa dbt'de ORA_SCHEMA=&S. ver)
 SELECT USER AS bagli_kullanici, SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA') AS aktif_sema FROM dual;

@@ -8,12 +8,18 @@
 SET DEFINE ON
 SET VERIFY OFF
 DEFINE P = DOA_
+DEFINE S = GLOBAL_DWH
+-- Tüm şemasız isimler bu şemaya gider (kendi kullanıcınla bağlansan bile). Şemanın kendisiyle bağlıysan etkisiz.
+ALTER SESSION SET CURRENT_SCHEMA = &S.;
 
 
 WHENEVER SQLERROR EXIT
 BEGIN
   IF LENGTH('&P.') < 3 OR SUBSTR('&P.', -1) <> '_' OR '&P.' <> UPPER('&P.') THEN
     RAISE_APPLICATION_ERROR(-20900, 'Önek hatalı: en az 3 karakter, büyük harf, _ ile bitmeli. Şu an: &P.');
+  END IF;
+  IF SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA') <> UPPER('&S.') THEN
+    RAISE_APPLICATION_ERROR(-20900, 'Aktif şema &S. değil: ' || SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA'));
   END IF;
 END;
 /

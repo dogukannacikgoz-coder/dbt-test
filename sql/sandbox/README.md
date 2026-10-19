@@ -12,7 +12,9 @@ Ekibin ortak sandbox şemasında, **başkalarının tablolarına dokunmadan** t�
 
 ## Adımlar
 Önek: büyük harf, `_` ile biten, şemada kimsenin kullanmadığı bir değer (örnekte `DOA_`).
-Her `.sql` dosyasının başındaki `DEFINE P = DOA_` satırını kendi önekinle değiştir. SQL Developer'da **F5 (Run Script)** ile çalıştır.
+Her `.sql` dosyasının başında iki satır var: `DEFINE P = DOA_` (önek) ve `DEFINE S = GLOBAL_DWH` (şema). Kendi değerlerinle değiştir.
+Script'ler `ALTER SESSION SET CURRENT_SCHEMA = &S.` ile başlar; kendi kullanıcınla bağlansan bile her şey o şemada yaratılır, aktif şema
+farklıysa script durur. SQL Developer'da **F5 (Run Script)** ile çalıştır.
 
 | # | Ne | Nasıl |
 |---|---|---|

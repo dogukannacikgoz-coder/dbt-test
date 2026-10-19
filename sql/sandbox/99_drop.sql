@@ -8,12 +8,18 @@
 SET DEFINE ON
 SET VERIFY OFF
 DEFINE P = DOA_
+DEFINE S = GLOBAL_DWH
+-- Tüm şemasız isimler bu şemaya gider (kendi kullanıcınla bağlansan bile). Şemanın kendisiyle bağlıysan etkisiz.
+ALTER SESSION SET CURRENT_SCHEMA = &S.;
 
 
 WHENEVER SQLERROR EXIT
 BEGIN
   IF LENGTH('&P.') < 3 OR SUBSTR('&P.', -1) <> '_' OR '&P.' <> UPPER('&P.') THEN
     RAISE_APPLICATION_ERROR(-20900, 'Önek hatalı: en az 3 karakter, büyük harf, _ ile bitmeli. Şu an: &P.');
+  END IF;
+  IF SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA') <> UPPER('&S.') THEN
+    RAISE_APPLICATION_ERROR(-20900, 'Aktif şema &S. değil: ' || SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA'));
   END IF;
 END;
 /
@@ -26,10 +32,10 @@ DECLARE
   PROCEDURE drop_tab(p_name VARCHAR2, p_gtt BOOLEAN DEFAULT FALSE) IS
   BEGIN
     IF p_gtt THEN
-      BEGIN EXECUTE IMMEDIATE 'TRUNCATE TABLE "' || p_name || '"';
+      BEGIN EXECUTE IMMEDIATE 'TRUNCATE TABLE "&S."."' || p_name || '"';
       EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;
     END IF;
-    EXECUTE IMMEDIATE 'DROP TABLE "' || p_name || '" PURGE';
+    EXECUTE IMMEDIATE 'DROP TABLE "&S."."' || p_name || '" PURGE';
     DBMS_OUTPUT.PUT_LINE('dropped ' || p_name);
   EXCEPTION WHEN OTHERS THEN
     IF SQLCODE != -942 THEN RAISE; END IF;   -- yoksa geç
@@ -158,12 +164,13 @@ BEGIN
   drop_tab('&P.T_CFD_TMP02');
 END;
 /
-BEGIN EXECUTE IMMEDIATE 'DROP SEQUENCE "&P.SEQ_T_SCD"';
+BEGIN EXECUTE IMMEDIATE 'DROP SEQUENCE "&S."."&P.SEQ_T_SCD"';
 EXCEPTION WHEN OTHERS THEN IF SQLCODE != -2289 THEN RAISE; END IF; END;
 /
 
 PROMPT == Kalan (olmamalı; mg_flow_ckm fail olduysa I$_&P.T_MG_FLOW_xxxxxx kalabilir, elle drop et)
-SELECT object_type, object_name FROM user_objects
- WHERE SUBSTR(object_name, 1, LENGTH('&P.')) = '&P.'
-    OR SUBSTR(object_name, 1, 3 + LENGTH('&P.')) IN ('I$_&P.', 'C$_&P.', 'X$_&P.', 'E$_&P.')
+SELECT object_type, object_name FROM all_objects
+ WHERE owner = SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA')
+   AND (SUBSTR(object_name, 1, LENGTH('&P.')) = '&P.'
+    OR SUBSTR(object_name, 1, 3 + LENGTH('&P.')) IN ('I$_&P.', 'C$_&P.', 'X$_&P.', 'E$_&P.'))
  ORDER BY 2;
