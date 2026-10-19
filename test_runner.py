@@ -134,7 +134,8 @@ def last_sess():
 
 
 def dbt(*args, load_date, extra_vars="", expect_fail=False):
-    vars_ = "{load_date: '" + load_date + "'" + (", " + extra_vars if extra_vars else "") + "}"
+    # test_runner kendi ODI_TEST* şemasında öneksiz tablolarla çalışır (sandbox önek zorunluluğu burada kapalı)
+    vars_ = "{odi_require_name_prefix: false, load_date: '" + load_date + "'" + (", " + extra_vars if extra_vars else "") + "}"
     cmd = ["dbt", "run", "--profiles-dir", HERE, "--project-dir", HERE, *TARGET_ARGS, "--vars", vars_, *args]
     if SELECT and "-s" not in args:
         cmd += ["-s", SELECT]
