@@ -206,6 +206,8 @@
 {% macro odi_write_log(ctx, title, rows, secs) %}
   {%- set log_table = var('odi_log_table', none) -%}
   {%- if log_table -%}
+    {#- şemasız verilirse model şemasında aranır (kendi kullanıcınla başka şemaya yazarken de doğru tabloya gider) -#}
+    {%- set log_table = log_table if '.' in log_table else this.schema ~ '.' ~ log_table -%}
     {% call statement('odi_log', auto_begin=True) %}
       insert into {{ log_table }}
         (sess_no, model_name, km_name, step_no, step_name, rows_affected, duration_sec, log_date)

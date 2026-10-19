@@ -109,6 +109,9 @@ HEADER = """-- =================================================================
 SET DEFINE ON
 SET VERIFY OFF
 DEFINE P = DOA_
+DEFINE S = GLOBAL_DWH
+-- Tüm şemasız isimler bu şemaya gider (kendi kullanıcınla bağlansan bile). Şemanın kendisiyle bağlıysan etkisiz.
+ALTER SESSION SET CURRENT_SCHEMA = &S.;
 """
 
 GUARD = """
@@ -116,6 +119,9 @@ WHENEVER SQLERROR EXIT
 BEGIN
   IF LENGTH('&P.') < 3 OR SUBSTR('&P.', -1) <> '_' OR '&P.' <> UPPER('&P.') THEN
     RAISE_APPLICATION_ERROR(-20900, 'Önek hatalı: en az 3 karakter, büyük harf, _ ile bitmeli. Şu an: &P.');
+  END IF;
+  IF SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA') <> UPPER('&S.') THEN
+    RAISE_APPLICATION_ERROR(-20900, 'Aktif şema &S. değil: ' || SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA'));
   END IF;
 END;
 /
@@ -131,15 +137,16 @@ files = {}
 files["00_precheck.sql"] = HEADER.format(title="00 — ÖN KONTROL (sadece okur, hiçbir şey değiştirmez)") + GUARD + """
 PROMPT == Bu önekle başlayan nesne var mı? (BOŞ dönmeli. Dönüyorsa başka önek seç.)
 SELECT object_type, object_name, created
-  FROM user_objects
- WHERE SUBSTR(object_name, 1, LENGTH('&P.')) = '&P.'
-    OR SUBSTR(object_name, 1, 3 + LENGTH('&P.')) IN ('I$_&P.', 'C$_&P.', 'X$_&P.', 'E$_&P.')
+  FROM all_objects
+ WHERE owner = SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA')
+   AND (SUBSTR(object_name, 1, LENGTH('&P.')) = '&P.'
+    OR SUBSTR(object_name, 1, 3 + LENGTH('&P.')) IN ('I$_&P.', 'C$_&P.', 'X$_&P.', 'E$_&P.'))
  ORDER BY 2;
 
 PROMPT == Yetkiler (CREATE TABLE / CREATE SEQUENCE olmalı)
 SELECT privilege FROM session_privs WHERE privilege IN ('CREATE TABLE', 'CREATE SEQUENCE', 'CREATE ANY TABLE', 'COMMENT ANY TABLE') ORDER BY 1;
 
-PROMPT == Bağlı kullanıcı / aktif şema (ikisi aynı olmalı; farklıysa ORA_SCHEMA ver)
+PROMPT == Bağlı kullanıcı / aktif şema (aktif şema &S. olmalı; kullanıcı farklıysa dbt'de ORA_SCHEMA=&S. ver)
 SELECT USER AS bagli_kullanici, SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA') AS aktif_sema FROM dual;
 """
 
@@ -184,6 +191,10 @@ for day in ["day1", "day2", "day3"]:
                 f"where model_name like '%.&P.{m['alias']}')")
         for desc, sql, exp in cs:
             q = pfx(sql).replace(":sess", sess)
+            own = "owner = sys_context('USERENV', 'CURRENT_SCHEMA') and "
+            q = (q.replace("from user_tables where ", "from all_tables where " + own)
+                  .replace("from user_tab_partitions where ", "from all_tab_partitions where table_" + own)
+                  .replace("from user_ind_partitions where ", "from all_ind_partitions where index_" + own))
             body.append(f"PROMPT -- {desc}   ==> beklenen: {fmt(exp)}")
             body.append(stmt(q))
     files[f"check_{day}.sql"] = "\n".join(body) + "\n"
@@ -200,10 +211,10 @@ DECLARE
   PROCEDURE drop_tab(p_name VARCHAR2, p_gtt BOOLEAN DEFAULT FALSE) IS
   BEGIN
     IF p_gtt THEN
-      BEGIN EXECUTE IMMEDIATE 'TRUNCATE TABLE "' || p_name || '"';
+      BEGIN EXECUTE IMMEDIATE 'TRUNCATE TABLE "&S."."' || p_name || '"';
       EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;
     END IF;
-    EXECUTE IMMEDIATE 'DROP TABLE "' || p_name || '" PURGE';
+    EXECUTE IMMEDIATE 'DROP TABLE "&S."."' || p_name || '" PURGE';
     DBMS_OUTPUT.PUT_LINE('dropped ' || p_name);
   EXCEPTION WHEN OTHERS THEN
     IF SQLCODE != -942 THEN RAISE; END IF;   -- yoksa geç
@@ -221,14 +232,15 @@ for n in all_tables:
 body.append("""END;
 /""")
 for s in seqs:
-    body.append(f"""BEGIN EXECUTE IMMEDIATE 'DROP SEQUENCE "&P.{s}"';
+    body.append(f"""BEGIN EXECUTE IMMEDIATE 'DROP SEQUENCE "&S."."&P.{s}"';
 EXCEPTION WHEN OTHERS THEN IF SQLCODE != -2289 THEN RAISE; END IF; END;
 /""")
 body.append("""
 PROMPT == Kalan (olmamalı; mg_flow_ckm fail olduysa I$_&P.T_MG_FLOW_xxxxxx kalabilir, elle drop et)
-SELECT object_type, object_name FROM user_objects
- WHERE SUBSTR(object_name, 1, LENGTH('&P.')) = '&P.'
-    OR SUBSTR(object_name, 1, 3 + LENGTH('&P.')) IN ('I$_&P.', 'C$_&P.', 'X$_&P.', 'E$_&P.')
+SELECT object_type, object_name FROM all_objects
+ WHERE owner = SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA')
+   AND (SUBSTR(object_name, 1, LENGTH('&P.')) = '&P.'
+    OR SUBSTR(object_name, 1, 3 + LENGTH('&P.')) IN ('I$_&P.', 'C$_&P.', 'X$_&P.', 'E$_&P.'))
  ORDER BY 2;""")
 files["99_drop.sql"] = "\n".join(body) + "\n"
 
