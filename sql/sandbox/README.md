@@ -32,7 +32,10 @@ farklıysa script durur. SQL Developer'da **F5 (Run Script)** ile çalıştır.
 `sql/sandbox/plain/` altında aynı scriptlerin önek (`DOA_`) ve şeması (`GLOBAL_DWH`) dosyanın içine yazılı sürümü var:
 `SET` / `DEFINE` / `WHENEVER` / `PROMPT` yok, her SQL aracında çalışır (DBeaver, Toad, SQL Developer).
 Script olarak çalıştır ve aracında "hata olunca dur" açık olsun. Farklı önek/şema için:
-`python scripts/gen_sandbox_sql.py --prefix X_ --schema Y`.
+```bash
+python scripts/hardcode_sandbox_sql.py --prefix X_ --schema Y            # -> sql/sandbox/plain/
+python scripts/hardcode_sandbox_sql.py --prefix X_ --schema Y --inplace  # sql/sandbox/*.sql üzerine yazar
+```
 
 ## dbt ortamı
 ```bash
