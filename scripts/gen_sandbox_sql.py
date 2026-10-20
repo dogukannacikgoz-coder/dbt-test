@@ -4,8 +4,13 @@ sql/sandbox/*.sql dosyalarını model başlıklarından üretir (Oracle örnekle
 Paylaşılan sandbox şemasında elle test için: her nesne adı &P. (SQL Developer / SQL*Plus
 substitution değişkeni) önekiyle yazılır. Kullanıcı scriptlerin başında DEFINE P = <ÖNEK>_ verir.
 
-  python scripts/gen_sandbox_sql.py
+  python scripts/gen_sandbox_sql.py                                   # sql/sandbox/*.sql (DEFINE P / S ile)
+  python scripts/gen_sandbox_sql.py --prefix DOA_ --schema GLOBAL_DWH  # + sql/sandbox/plain/*.sql
+
+plain/ sürümü: SET / DEFINE / WHENEVER / PROMPT yok, önek ve şema dosyanın içine yazılı.
+SET DEFINE'ı desteklemeyen araçlar (DBeaver, Toad, SQL Developer'da Ctrl+Enter vb.) için.
 """
+import argparse
 import ast
 import glob
 import os
@@ -248,3 +253,38 @@ for fn, content in files.items():
     with open(os.path.join(OUT, fn), "w", encoding="utf-8") as f:
         f.write(content)
 print("\n".join(sorted(files)))
+
+
+# ---------------------------------------------------------------------------
+# plain/ : substitution değişkeni olmayan sürüm (herhangi bir SQL aracında çalışır)
+# ---------------------------------------------------------------------------
+ap = argparse.ArgumentParser()
+ap.add_argument("--prefix", default="DOA_")
+ap.add_argument("--schema", default="GLOBAL_DWH")
+args = ap.parse_args()
+P, S = args.prefix.upper(), args.schema.upper()
+if not re.fullmatch(r"[A-Z][A-Z0-9_]{1,}_", P):
+    raise SystemExit(f"önek hatalı: {P!r} (büyük harf, en az 3 karakter, _ ile biten)")
+if not re.fullmatch(r"[A-Z][A-Z0-9_$#]*", S):
+    raise SystemExit(f"şema adı hatalı: {S!r}")
+
+PLAIN = os.path.join(OUT, "plain")
+os.makedirs(PLAIN, exist_ok=True)
+DROP_LINE = re.compile(r"^(SET (DEFINE|VERIFY|PAGESIZE|LINESIZE)\b|DEFINE [PS] =|WHENEVER SQLERROR)", re.I)
+for fn, content in files.items():
+    out = []
+    for line in content.split("\n"):
+        if DROP_LINE.match(line):
+            continue
+        if line.startswith("PROMPT"):
+            line = "-- " + line[len("PROMPT"):].lstrip()
+        out.append(line.replace("&P.", P).replace("&S.", S))
+    text = "\n".join(out)
+    text = text.replace(
+        "-- Tüm şemasız isimler bu şemaya gider (kendi kullanıcınla bağlansan bile). Şemanın kendisiyle bağlıysan etkisiz.",
+        f"-- PLAIN sürüm: önek {P}, şema {S} dosyaya gömülü. Script olarak çalıştır (SQL Developer F5 / DBeaver Alt+X),\n"
+        f"-- aracında 'hata olunca dur' açık olsun. Önek/şema değişecekse: python scripts/gen_sandbox_sql.py --prefix X_ --schema Y")
+    assert "&" not in text.replace("&&", ""), fn
+    with open(os.path.join(PLAIN, fn), "w", encoding="utf-8") as f:
+        f.write(text)
+print(f"plain/ -> önek {P}, şema {S}")

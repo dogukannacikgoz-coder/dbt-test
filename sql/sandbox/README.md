@@ -28,6 +28,12 @@ farklıysa script durur. SQL Developer'da **F5 (Run Script)** ile çalıştır.
 
 `check_dayN.sql` her kontrolün üstüne `==> beklenen: ...` yazar; çıktıyı onunla karşılaştır.
 
+## SET DEFINE çalışmıyorsa → `plain/`
+`sql/sandbox/plain/` altında aynı scriptlerin önek (`DOA_`) ve şeması (`GLOBAL_DWH`) dosyanın içine yazılı sürümü var:
+`SET` / `DEFINE` / `WHENEVER` / `PROMPT` yok, her SQL aracında çalışır (DBeaver, Toad, SQL Developer).
+Script olarak çalıştır ve aracında "hata olunca dur" açık olsun. Farklı önek/şema için:
+`python scripts/gen_sandbox_sql.py --prefix X_ --schema Y`.
+
 ## dbt ortamı
 ```bash
 export ORA_HOST=... ORA_PORT=1521 ORA_SERVICE=... ORA_USER=... ORA_PWD=...
